@@ -4,14 +4,20 @@ from datetime import datetime
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-)
+from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, MIN_VOLTAGE, MAX_VOLTAGE, CONF_DEVICE_ACCESS_TOKEN # Added import
+from .const import (
+    DOMAIN,
+    MIN_VOLTAGE,
+    MAX_VOLTAGE,
+    CONF_DEVICE_ACCESS_TOKEN,
+    CHARGING_VOLTAGE_THRESHOLD,
+    CHARGE_DURATION_HOURS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -121,8 +127,90 @@ class TrmnlBatterySensor(TrmnlBaseSensor):
         return "mdi:battery"
 
 
-class TrmnlBatteryPercentageSensor(TrmnlBaseSensor):
-    """Representation of a TRMNL battery percentage sensor."""
+class TrmnlBatteryPercentageSensor(TrmnlBaseSensor, RestoreEntity):
+    """Battery percentage sensor with charging-state tracking.
+
+    Extends RestoreEntity so charging state survives HA restarts.
+    Charging is detected when voltage exceeds CHARGING_VOLTAGE_THRESHOLD.
+    While charging, SOC is linearly interpolated from soc_at_charge_start
+    to 100 % over CHARGE_DURATION_HOURS instead of using the raw voltage curve.
+    """
+
+    def __init__(self, coordinator, device):
+        """Initialize the sensor."""
+        super().__init__(coordinator, device)
+        self._computed_percentage = None
+        self._charging = False
+        self._soc_at_charge_start = None
+        self._charge_start_time = None
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    async def async_added_to_hass(self):
+        """Restore state, then re-derive current charging context."""
+        await super().async_added_to_hass()
+
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.attributes:
+            attrs = last_state.attributes
+            soc_start = attrs.get("soc_at_charge_start")
+            if soc_start is not None:
+                self._soc_at_charge_start = float(soc_start)
+            start_str = attrs.get("charge_start_time")
+            if start_str:
+                self._charge_start_time = dt_util.parse_datetime(start_str)
+            try:
+                self._computed_percentage = int(last_state.state)
+            except (ValueError, TypeError):
+                pass
+
+        # Recompute with restored charging context so the first written
+        # state after restart is already correct.
+        device_data = self.get_device_data()
+        if device_data:
+            self._update_charging_state(float(device_data["battery_voltage"]))
+        self.async_write_ha_state()
+
+    # ------------------------------------------------------------------
+    # Coordinator update
+    # ------------------------------------------------------------------
+
+    @callback
+    def _handle_coordinator_update(self):
+        """Handle updated data from the coordinator."""
+        device_data = self.get_device_data()
+        if device_data:
+            self._update_charging_state(float(device_data["battery_voltage"]))
+        self.async_write_ha_state()
+
+    def _update_charging_state(self, voltage):
+        if voltage > CHARGING_VOLTAGE_THRESHOLD:
+            if not self._charging:
+                if self._charge_start_time is None:
+                    # New charge cycle: snapshot current SOC and record start time.
+                    self._soc_at_charge_start = (
+                        self._computed_percentage if self._computed_percentage is not None else 0
+                    )
+                    self._charge_start_time = dt_util.utcnow()
+                # else: restored from a previous cycle — keep existing values.
+                self._charging = True
+            elapsed_h = (
+                (dt_util.utcnow() - self._charge_start_time).total_seconds() / 3600
+            )
+            soc_start = self._soc_at_charge_start
+            soc = soc_start + (elapsed_h / CHARGE_DURATION_HOURS) * (100 - soc_start)
+            self._computed_percentage = round(min(100, max(0, soc)))
+        else:
+            self._charging = False
+            self._soc_at_charge_start = None
+            self._charge_start_time = None
+            self._computed_percentage = calculate_battery_percentage(voltage)
+
+    # ------------------------------------------------------------------
+    # Entity properties
+    # ------------------------------------------------------------------
 
     @property
     def unique_id(self):
@@ -137,10 +225,7 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor):
     @property
     def state(self):
         """Return the state of the sensor."""
-        device_data = self.get_device_data()
-        if device_data:
-            return calculate_battery_percentage(float(device_data["battery_voltage"]))
-        return None
+        return self._computed_percentage
 
     @property
     def unit_of_measurement(self):
@@ -161,6 +246,29 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor):
     def icon(self):
         """Return the icon of the sensor."""
         return "mdi:battery"
+
+    @property
+    def extra_state_attributes(self):
+        """Return the state attributes."""
+        device_data = self.get_device_data()
+        voltage = float(device_data["battery_voltage"]) if device_data else None
+        attrs = {
+            "charging_state": "charging" if self._charging else "discharging",
+            "voltage": voltage,
+            "last_updated": dt_util.utcnow().isoformat(),
+        }
+        if self._charging:
+            attrs["soc_at_charge_start"] = self._soc_at_charge_start
+            if self._charge_start_time:
+                elapsed_h = (
+                    (dt_util.utcnow() - self._charge_start_time).total_seconds() / 3600
+                )
+                attrs["time_remaining_hours"] = round(
+                    max(0.0, CHARGE_DURATION_HOURS - elapsed_h), 1
+                )
+                # Stored as ISO string so async_get_last_state can restore it.
+                attrs["charge_start_time"] = self._charge_start_time.isoformat()
+        return attrs
 
 
 class TrmnlRssiSensor(TrmnlBaseSensor):

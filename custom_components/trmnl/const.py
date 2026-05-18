@@ -17,3 +17,7 @@ MIN_SCAN_INTERVAL = 60 # Minimum scan interval in seconds (1 minute)
 # Battery voltage limits
 MIN_VOLTAGE = 3.3   # 0 % SOC for this device
 MAX_VOLTAGE = 4.1   # 100 % SOC for this device
+
+# Charging detection
+CHARGING_VOLTAGE_THRESHOLD = 4.5   # Voltage above this means charger is connected
+CHARGE_DURATION_HOURS = 4          # Assumed full-charge time from 0 % SOC
