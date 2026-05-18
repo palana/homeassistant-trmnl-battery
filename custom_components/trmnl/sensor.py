@@ -29,7 +29,7 @@ def calculate_battery_percentage(voltage):
         return 100
 
     percentage = ((voltage - MIN_VOLTAGE) / (MAX_VOLTAGE - MIN_VOLTAGE)) * 100
-    return round(percentage)
+    return percentage
 
 async def async_setup_entry(
         hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
@@ -162,7 +162,7 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor, RestoreEntity):
             if start_str:
                 self._charge_start_time = dt_util.parse_datetime(start_str)
             try:
-                self._computed_percentage = int(last_state.state)
+                self._computed_percentage = float(last_state.state)
             except (ValueError, TypeError):
                 pass
 
@@ -199,9 +199,9 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor, RestoreEntity):
             elapsed_h = (
                 (dt_util.utcnow() - self._charge_start_time).total_seconds() / 3600
             )
-            soc_start = self._soc_at_charge_start
+            soc_start = self._soc_at_charge_start if self._soc_at_charge_start is not None else 0.0
             soc = soc_start + (elapsed_h / CHARGE_DURATION_HOURS) * (100 - soc_start)
-            self._computed_percentage = round(min(100, max(0, soc)))
+            self._computed_percentage = min(100.0, max(0.0, soc))
         else:
             self._charging = False
             self._soc_at_charge_start = None
@@ -211,6 +211,8 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor, RestoreEntity):
     # ------------------------------------------------------------------
     # Entity properties
     # ------------------------------------------------------------------
+
+    suggested_display_precision = 1
 
     @property
     def unique_id(self):
