@@ -15,5 +15,5 @@ MIN_SCAN_INTERVAL = 60 # Minimum scan interval in seconds (1 minute)
 
 
 # Battery voltage limits
-MIN_VOLTAGE = 3.0  # Battery disconnects at this voltage
-MAX_VOLTAGE = 4.2   # Typical fully charged LiPo voltage
+MIN_VOLTAGE = 3.3   # 0 % SOC for this device
+MAX_VOLTAGE = 4.1   # 100 % SOC for this device
