@@ -11,7 +11,7 @@ CONF_SCAN_INTERVAL = "scan_interval"
 # Defaults
 DEFAULT_SCAN_INTERVAL = 300  # 5 minutes
 DEFAULT_API_BASE_URL = "https://usetrmnl.com" # Renamed and updated from DEFAULT_API_ENDPOINT
-MIN_SCAN_INTERVAL = 60 # Minimum scan interval in seconds (1 minute)
+MIN_SCAN_INTERVAL = 15 # Minimum scan interval in seconds
 
 
 # Battery voltage limits
