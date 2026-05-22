@@ -200,7 +200,7 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor, RestoreEntity):
                 (dt_util.utcnow() - self._charge_start_time).total_seconds() / 3600
             )
             soc_start = self._soc_at_charge_start if self._soc_at_charge_start is not None else 0.0
-            soc = soc_start + (elapsed_h / CHARGE_DURATION_HOURS) * (100 - soc_start)
+            soc = soc_start + elapsed_h * (100.0 / CHARGE_DURATION_HOURS)
             self._computed_percentage = min(100.0, max(0.0, soc))
         else:
             self._charging = False
@@ -265,9 +265,9 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor, RestoreEntity):
                 elapsed_h = (
                     (dt_util.utcnow() - self._charge_start_time).total_seconds() / 3600
                 )
-                attrs["time_remaining_hours"] = round(
-                    max(0.0, CHARGE_DURATION_HOURS - elapsed_h), 1
-                )
+                soc_start = self._soc_at_charge_start if self._soc_at_charge_start is not None else 0.0
+                time_to_full = (100.0 - soc_start) * CHARGE_DURATION_HOURS / 100.0
+                attrs["time_remaining_hours"] = round(max(0.0, time_to_full - elapsed_h), 2)
                 # Stored as ISO string so async_get_last_state can restore it.
                 attrs["charge_start_time"] = self._charge_start_time.isoformat()
         return attrs
