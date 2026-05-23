@@ -17,6 +17,8 @@ from .const import (
     CONF_DEVICE_ACCESS_TOKEN,
     CHARGING_VOLTAGE_THRESHOLD,
     CHARGE_DURATION_HOURS,
+    CC_SOC_THRESHOLD,
+    CV_SLOWDOWN_FACTOR,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -200,7 +202,16 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor, RestoreEntity):
                 (dt_util.utcnow() - self._charge_start_time).total_seconds() / 3600
             )
             soc_start = self._soc_at_charge_start if self._soc_at_charge_start is not None else 0.0
-            soc = soc_start + elapsed_h * (100.0 / CHARGE_DURATION_HOURS)
+            cc_rate = 100.0 / CHARGE_DURATION_HOURS
+            cv_rate = cc_rate * CV_SLOWDOWN_FACTOR
+            if soc_start < CC_SOC_THRESHOLD:
+                cc_time = (CC_SOC_THRESHOLD - soc_start) / cc_rate
+                if elapsed_h <= cc_time:
+                    soc = soc_start + elapsed_h * cc_rate
+                else:
+                    soc = CC_SOC_THRESHOLD + (elapsed_h - cc_time) * cv_rate
+            else:
+                soc = soc_start + elapsed_h * cv_rate
             self._computed_percentage = min(100.0, max(0.0, soc))
         else:
             self._charging = False
@@ -262,14 +273,15 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor, RestoreEntity):
         if self._charging:
             attrs["soc_at_charge_start"] = self._soc_at_charge_start
             if self._charge_start_time:
-                elapsed_h = (
-                    (dt_util.utcnow() - self._charge_start_time).total_seconds() / 3600
-                )
-                soc_start = self._soc_at_charge_start if self._soc_at_charge_start is not None else 0.0
-                time_to_full = (100.0 - soc_start) * CHARGE_DURATION_HOURS / 100.0
-                attrs["time_remaining_hours"] = round(max(0.0, time_to_full - elapsed_h), 2)
-                # Stored as ISO string so async_get_last_state can restore it.
                 attrs["charge_start_time"] = self._charge_start_time.isoformat()
+                soc_now = self._computed_percentage if self._computed_percentage is not None else 0.0
+                cc_rate = 100.0 / CHARGE_DURATION_HOURS
+                cv_rate = cc_rate * CV_SLOWDOWN_FACTOR
+                if soc_now < CC_SOC_THRESHOLD:
+                    time_remaining = (CC_SOC_THRESHOLD - soc_now) / cc_rate + (100.0 - CC_SOC_THRESHOLD) / cv_rate
+                else:
+                    time_remaining = max(0.0, (100.0 - soc_now) / cv_rate)
+                attrs["time_remaining_hours"] = round(time_remaining, 2)
         return attrs
 
 
