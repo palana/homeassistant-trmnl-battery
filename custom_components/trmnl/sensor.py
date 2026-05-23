@@ -19,6 +19,7 @@ from .const import (
     CHARGE_DURATION_HOURS,
     CC_SOC_THRESHOLD,
     CV_SLOWDOWN_FACTOR,
+    VOLTAGE_EMA_ALPHA,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -90,6 +91,21 @@ class TrmnlBaseSensor(CoordinatorEntity, SensorEntity):
 class TrmnlBatterySensor(TrmnlBaseSensor):
     """Representation of a TRMNL battery voltage sensor."""
 
+    def __init__(self, coordinator, device):
+        super().__init__(coordinator, device)
+        self._voltage_ema: float | None = None
+
+    @callback
+    def _handle_coordinator_update(self):
+        device_data = self.get_device_data()
+        if device_data:
+            voltage = float(device_data["battery_voltage"])
+            if self._voltage_ema is None:
+                self._voltage_ema = voltage
+            else:
+                self._voltage_ema = VOLTAGE_EMA_ALPHA * voltage + (1 - VOLTAGE_EMA_ALPHA) * self._voltage_ema
+        self.async_write_ha_state()
+
     @property
     def unique_id(self):
         """Return a unique ID to use for this entity."""
@@ -102,11 +118,15 @@ class TrmnlBatterySensor(TrmnlBaseSensor):
 
     @property
     def state(self):
-        """Return the state of the sensor."""
+        return self._voltage_ema
+
+    @property
+    def extra_state_attributes(self):
         device_data = self.get_device_data()
-        if device_data:
-            return float(device_data["battery_voltage"])
-        return None
+        return {
+            "raw_voltage": float(device_data["battery_voltage"]) if device_data else None,
+            "last_updated": dt_util.utcnow().isoformat(),
+        }
 
     @property
     def unit_of_measurement(self):
@@ -145,6 +165,7 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor, RestoreEntity):
         self._charging = False
         self._soc_at_charge_start = None
         self._charge_start_time = None
+        self._voltage_ema: float | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -172,7 +193,9 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor, RestoreEntity):
         # state after restart is already correct.
         device_data = self.get_device_data()
         if device_data:
-            self._update_charging_state(float(device_data["battery_voltage"]))
+            voltage = float(device_data["battery_voltage"])
+            self._voltage_ema = voltage
+            self._update_charging_state(voltage)
         self.async_write_ha_state()
 
     # ------------------------------------------------------------------
@@ -184,7 +207,12 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor, RestoreEntity):
         """Handle updated data from the coordinator."""
         device_data = self.get_device_data()
         if device_data:
-            self._update_charging_state(float(device_data["battery_voltage"]))
+            voltage = float(device_data["battery_voltage"])
+            if self._voltage_ema is None:
+                self._voltage_ema = voltage
+            else:
+                self._voltage_ema = VOLTAGE_EMA_ALPHA * voltage + (1 - VOLTAGE_EMA_ALPHA) * self._voltage_ema
+            self._update_charging_state(self._voltage_ema)
         self.async_write_ha_state()
 
     def _update_charging_state(self, voltage):
@@ -263,11 +291,9 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor, RestoreEntity):
     @property
     def extra_state_attributes(self):
         """Return the state attributes."""
-        device_data = self.get_device_data()
-        voltage = float(device_data["battery_voltage"]) if device_data else None
         attrs = {
             "charging_state": "charging" if self._charging else "discharging",
-            "voltage": voltage,
+            "voltage": self._voltage_ema,
             "last_updated": dt_util.utcnow().isoformat(),
         }
         if self._charging:

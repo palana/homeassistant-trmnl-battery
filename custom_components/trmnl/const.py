@@ -21,5 +21,6 @@ MAX_VOLTAGE = 4.1   # 100 % SOC for this device
 # Charging detection
 CHARGING_VOLTAGE_THRESHOLD = 4.5   # Voltage above this means charger is connected
 CHARGE_DURATION_HOURS = 5.25       # CC phase: time from 0 % to 100 % at constant rate (~19 %/h empirical)
+VOLTAGE_EMA_ALPHA = 0.2            # EMA smoothing factor for voltage (lower = smoother, slower)
 CC_SOC_THRESHOLD = 85.0            # % SOC where CV (tapering) phase begins
 CV_SLOWDOWN_FACTOR = 0.3           # CV phase charge rate as fraction of CC rate
