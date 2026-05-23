@@ -62,6 +62,21 @@ class TrmnlBaseSensor(CoordinatorEntity, SensorEntity):
         self._friendly_id = device["friendly_id"]
         self._mac_address = device["mac_address"]
         self._name = device["name"]
+        self._voltage_ema: float | None = None
+        self._was_charging: bool = False
+
+    def _apply_voltage_ema(self, voltage: float) -> float:
+        """Apply EMA smoothing; clamp to only decrease during discharge."""
+        is_charging = voltage > CHARGING_VOLTAGE_THRESHOLD
+        if self._voltage_ema is None or (self._was_charging and not is_charging):
+            self._voltage_ema = voltage
+        elif is_charging:
+            self._voltage_ema = VOLTAGE_EMA_ALPHA * voltage + (1 - VOLTAGE_EMA_ALPHA) * self._voltage_ema
+        else:
+            new_ema = VOLTAGE_EMA_ALPHA * voltage + (1 - VOLTAGE_EMA_ALPHA) * self._voltage_ema
+            self._voltage_ema = min(self._voltage_ema, new_ema)
+        self._was_charging = is_charging
+        return self._voltage_ema
 
     @property
     def device_info(self):
@@ -91,27 +106,11 @@ class TrmnlBaseSensor(CoordinatorEntity, SensorEntity):
 class TrmnlBatterySensor(TrmnlBaseSensor):
     """Representation of a TRMNL battery voltage sensor."""
 
-    def __init__(self, coordinator, device):
-        super().__init__(coordinator, device)
-        self._voltage_ema: float | None = None
-        self._was_charging: bool = False
-
     @callback
     def _handle_coordinator_update(self):
         device_data = self.get_device_data()
         if device_data:
-            voltage = float(device_data["battery_voltage"])
-            is_charging = voltage > CHARGING_VOLTAGE_THRESHOLD
-            if self._voltage_ema is None or (self._was_charging and not is_charging):
-                # First reading or just unplugged: reset to actual voltage.
-                self._voltage_ema = voltage
-            elif is_charging:
-                self._voltage_ema = VOLTAGE_EMA_ALPHA * voltage + (1 - VOLTAGE_EMA_ALPHA) * self._voltage_ema
-            else:
-                # Discharge: clamp so EMA only moves downward.
-                new_ema = VOLTAGE_EMA_ALPHA * voltage + (1 - VOLTAGE_EMA_ALPHA) * self._voltage_ema
-                self._voltage_ema = min(self._voltage_ema, new_ema)
-            self._was_charging = is_charging
+            self._apply_voltage_ema(float(device_data["battery_voltage"]))
         self.async_write_ha_state()
 
     @property
@@ -173,8 +172,6 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor, RestoreEntity):
         self._charging = False
         self._soc_at_charge_start = None
         self._charge_start_time = None
-        self._voltage_ema: float | None = None
-        self._was_charging: bool = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -216,17 +213,9 @@ class TrmnlBatteryPercentageSensor(TrmnlBaseSensor, RestoreEntity):
         """Handle updated data from the coordinator."""
         device_data = self.get_device_data()
         if device_data:
-            voltage = float(device_data["battery_voltage"])
-            is_charging = voltage > CHARGING_VOLTAGE_THRESHOLD
-            if self._voltage_ema is None or (self._was_charging and not is_charging):
-                self._voltage_ema = voltage
-            elif is_charging:
-                self._voltage_ema = VOLTAGE_EMA_ALPHA * voltage + (1 - VOLTAGE_EMA_ALPHA) * self._voltage_ema
-            else:
-                new_ema = VOLTAGE_EMA_ALPHA * voltage + (1 - VOLTAGE_EMA_ALPHA) * self._voltage_ema
-                self._voltage_ema = min(self._voltage_ema, new_ema)
-            self._was_charging = is_charging
-            self._update_charging_state(self._voltage_ema)
+            self._update_charging_state(
+                self._apply_voltage_ema(float(device_data["battery_voltage"]))
+            )
         self.async_write_ha_state()
 
     def _update_charging_state(self, voltage):
