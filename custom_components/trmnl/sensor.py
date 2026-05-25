@@ -66,12 +66,14 @@ class TrmnlBaseSensor(CoordinatorEntity, SensorEntity):
         self._was_charging: bool = False
 
     def _apply_voltage_ema(self, voltage: float) -> float:
-        """Apply EMA smoothing; clamp to only decrease during discharge."""
+        """Apply EMA smoothing; clamp to only decrease during discharge.
+
+        During charging the raw voltage is used directly — smoothing would delay
+        threshold detection and cause a false near-100% reading on plug-in.
+        """
         is_charging = voltage > CHARGING_VOLTAGE_THRESHOLD
-        if self._voltage_ema is None or (self._was_charging and not is_charging):
+        if is_charging or self._voltage_ema is None or (self._was_charging and not is_charging):
             self._voltage_ema = voltage
-        elif is_charging:
-            self._voltage_ema = VOLTAGE_EMA_ALPHA * voltage + (1 - VOLTAGE_EMA_ALPHA) * self._voltage_ema
         else:
             new_ema = VOLTAGE_EMA_ALPHA * voltage + (1 - VOLTAGE_EMA_ALPHA) * self._voltage_ema
             self._voltage_ema = min(self._voltage_ema, new_ema)
