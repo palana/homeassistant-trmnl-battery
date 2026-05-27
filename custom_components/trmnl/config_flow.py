@@ -119,9 +119,9 @@ class TrmnlOptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input=None):
         errors = {}
-        current_api_base_url = self.config_entry.data.get(CONF_API_BASE_URL, DEFAULT_API_BASE_URL)
-        current_device_access_token = self.config_entry.data.get(CONF_DEVICE_ACCESS_TOKEN, "")
-        current_scan_interval = self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        current_api_base_url = self.config_entry.options.get(CONF_API_BASE_URL, self.config_entry.data.get(CONF_API_BASE_URL, DEFAULT_API_BASE_URL))
+        current_device_access_token = self.config_entry.options.get(CONF_DEVICE_ACCESS_TOKEN, self.config_entry.data.get(CONF_DEVICE_ACCESS_TOKEN, ""))
+        current_scan_interval = self.config_entry.options.get(CONF_SCAN_INTERVAL, self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
 
         if user_input is not None:
             updated_data = self.config_entry.data.copy()
